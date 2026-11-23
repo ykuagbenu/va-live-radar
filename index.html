@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="./leaflet.css" />
   <style>
     html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #0f172a; font-family: system-ui, -apple-system, sans-serif; }
-    .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(90%); }
     .plane-icon { font-size: 22px; text-align: center; line-height: 24px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)); }
     .leaflet-popup-content-wrapper { background: #1e293b; color: #f8fafc; border-radius: 8px; border: 1px solid #334155; }
     .leaflet-popup-tip { background: #1e293b; }
@@ -34,20 +33,21 @@
       // PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINK HERE:
       const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
 
-      if (typeof L === 'undefined') {
-        badge.textContent = 'Error: Upload leaflet.js & leaflet.css to your GitHub repo';
-        return;
-      }
+      const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 3);
 
-      const map = L.map('map').setView(new Array(15.0, 20.0), 3);
-      L.tileLayer('https://openstreetmap.org{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap',
-        maxZoom: 18
+      // Esri World Dark Gray Canvas (fast, global, reliable dark radar map)
+      L.tileLayer('https://arcgisonline.com{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 16
+      }).addTo(map);
+
+      // Country & city labels overlay
+      L.tileLayer('https://arcgisonline.com{z}/{y}/{x}', {
+        maxZoom: 16
       }).addTo(map);
 
       const flightLayer = L.layerGroup().addTo(map);
 
-      // Built-in CSV parser (no external library required)
       function parseCSV(text) {
         const rows = [];
         let row = [], cur = '', inQuotes = false;
@@ -135,9 +135,22 @@
             const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
 
             const latLngs = points.map(p => new Array(p.lat, p.lon));
+            const startPt = points.at(0);
+            const endPt   = points.at(points.length - 1);
 
-            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.7 }).addTo(flightLayer);
+            // Departure dot (green) & Arrival dot (red)
+            L.circleMarker(new Array(startPt.lat, startPt.lon), {
+              radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1
+            }).bindTooltip('DEP: ' + dep).addTo(flightLayer);
 
+            L.circleMarker(new Array(endPt.lat, endPt.lon), {
+              radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1
+            }).bindTooltip('ARR: ' + arr).addTo(flightLayer);
+
+            // Full route line from Departure -> Waypoints -> Arrival
+            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.75 }).addTo(flightLayer);
+
+            // Calculate current position along segments
             const totalSegments = points.length - 1;
             const exactIdx = progress * totalSegments;
             const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
