@@ -6,7 +6,7 @@
   <title>VA Live Flight Radar</title>
   <link rel="stylesheet" href="./leaflet.css" />
   <style>
-    html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #0f172a; font-family: system-ui, -apple-system, sans-serif; }
+    html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #090e1a; font-family: system-ui, -apple-system, sans-serif; }
     .plane-icon { font-size: 22px; text-align: center; line-height: 24px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)); }
     .leaflet-popup-content-wrapper { background: #1e293b; color: #f8fafc; border-radius: 8px; border: 1px solid #334155; }
     .leaflet-popup-tip { background: #1e293b; }
@@ -27,24 +27,31 @@
 
   <script src="./leaflet.js"></script>
   <script>
-    window.addEventListener('load', function() {
+    window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
 
       // PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINK HERE:
       const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
 
-      const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 3);
+      const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
 
-      // Esri World Dark Gray Canvas (fast, global, reliable dark radar map)
-      L.tileLayer('https://arcgisonline.com{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri',
-        maxZoom: 16
-      }).addTo(map);
-
-      // Country & city labels overlay
-      L.tileLayer('https://arcgisonline.com{z}/{y}/{x}', {
-        maxZoom: 16
-      }).addTo(map);
+      // Load local world continents & country borders directly from your GitHub repo (zero external tile servers!)
+      try {
+        const geoResp = await fetch('./world.geojson');
+        if (geoResp.ok) {
+          const worldData = await geoResp.json();
+          L.geoJSON(worldData, {
+            style: {
+              fillColor: '#1e293b',
+              fillOpacity: 1,
+              color: '#334155',
+              weight: 1
+            }
+          }).addTo(map);
+        }
+      } catch (geoErr) {
+        console.warn('Could not load world.geojson:', geoErr);
+      }
 
       const flightLayer = L.layerGroup().addTo(map);
 
@@ -138,7 +145,6 @@
             const startPt = points.at(0);
             const endPt   = points.at(points.length - 1);
 
-            // Departure dot (green) & Arrival dot (red)
             L.circleMarker(new Array(startPt.lat, startPt.lon), {
               radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1
             }).bindTooltip('DEP: ' + dep).addTo(flightLayer);
@@ -147,10 +153,8 @@
               radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1
             }).bindTooltip('ARR: ' + arr).addTo(flightLayer);
 
-            // Full route line from Departure -> Waypoints -> Arrival
             L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.75 }).addTo(flightLayer);
 
-            // Calculate current position along segments
             const totalSegments = points.length - 1;
             const exactIdx = progress * totalSegments;
             const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
