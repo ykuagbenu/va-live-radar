@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VA Live Flight Radar</title>
-  <link rel="stylesheet" href="https://jsdelivr.net" />
+  <link rel="stylesheet" href="./leaflet.css" />
   <style>
     html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #0f172a; font-family: system-ui, -apple-system, sans-serif; }
     .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(90%); }
@@ -26,8 +26,7 @@
   <div id="map"></div>
   <div class="radar-badge" id="flight-counter">Loading radar...</div>
 
-  <script src="https://jsdelivr.net"></script>
-  <script src="https://jsdelivr.net"></script>
+  <script src="./leaflet.js"></script>
   <script>
     window.addEventListener('load', function() {
       const badge = document.getElementById('flight-counter');
@@ -36,7 +35,7 @@
       const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
 
       if (typeof L === 'undefined') {
-        badge.textContent = 'Error: Leaflet blocked—check adblocker/VPN';
+        badge.textContent = 'Error: Upload leaflet.js & leaflet.css to your GitHub repo';
         return;
       }
 
@@ -47,7 +46,24 @@
       }).addTo(map);
 
       const flightLayer = L.layerGroup().addTo(map);
-      badge.textContent = 'Map loaded. Syncing flights...';
+
+      // Built-in CSV parser (no external library required)
+      function parseCSV(text) {
+        const rows = [];
+        let row = [], cur = '', inQuotes = false;
+        for (let i = 0; i < text.length; i++) {
+          const ch = text.charAt(i), next = text.charAt(i + 1);
+          if (ch === '"' && inQuotes && next === '"') { cur += '"'; i++; }
+          else if (ch === '"') { inQuotes = !inQuotes; }
+          else if (ch === ',' && !inQuotes) { row.push(cur); cur = ''; }
+          else if ((ch === '\r' || ch === '\n') && !inQuotes) {
+            if (ch === '\r' && next === '\n') i++;
+            row.push(cur); rows.push(row); row = []; cur = '';
+          } else { cur += ch; }
+        }
+        if (cur.length > 0 || row.length > 0) { row.push(cur); rows.push(row); }
+        return rows;
+      }
 
       function parseDurationToMinutes(val) {
         if (!val) return 0;
@@ -71,94 +87,92 @@
         return (toDeg(Math.atan2(y, x)) + 360) % 360;
       }
 
-      function updateFlights() {
+      async function updateFlights() {
         if (!SHEET_CSV_URL.startsWith('http')) {
           badge.textContent = 'Error: Paste your Google Sheet CSV URL in index.html';
           return;
         }
 
-        const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+        try {
+          const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const csvText = await resp.text();
+          const rows = parseCSV(csvText);
 
-        Papa.parse(url, {
-          download: true,
-          header: false,
-          complete: function(results) {
-            flightLayer.clearLayers();
-            const rows = results.data;
-            let activeCount = 0;
+          flightLayer.clearLayers();
+          let activeCount = 0;
 
-            for (let i = 1; i < rows.length; i++) {
-              const row = rows.at(i);
-              if (!row || row.length < 22) continue;
+          for (let i = 1; i < rows.length; i++) {
+            const row = rows.at(i);
+            if (!row || row.length < 22) continue;
 
-              const pilot       = row.at(1)  || 'Unknown'; // Col B
-              const callsign    = row.at(2)  || 'N/A';     // Col C
-              const aircraft    = row.at(3)  || '';        // Col D
-              const regNo       = row.at(4)  || '';        // Col E
-              const livery      = row.at(5)  || '';        // Col F
-              const dep         = row.at(6)  || '';        // Col G
-              const arr         = row.at(7)  || '';        // Col H
-              const eftStr      = row.at(8)  || '';        // Col I
-              const timeLeftStr = row.at(13) || '';        // Col N (Dynamic ETE)
-              const elapsedStr  = row.at(14) || '';        // Col O (Elapsed Time)
-              const coordJson   = row.at(21) || '';        // Col V (Route Coord)
+            const pilot       = row.at(1)  || 'Unknown'; // Col B
+            const callsign    = row.at(2)  || 'N/A';     // Col C
+            const aircraft    = row.at(3)  || '';        // Col D
+            const regNo       = row.at(4)  || '';        // Col E
+            const livery      = row.at(5)  || '';        // Col F
+            const dep         = row.at(6)  || '';        // Col G
+            const arr         = row.at(7)  || '';        // Col H
+            const eftStr      = row.at(8)  || '';        // Col I
+            const timeLeftStr = row.at(13) || '';        // Col N (Dynamic ETE)
+            const elapsedStr  = row.at(14) || '';        // Col O (Elapsed Time)
+            const coordJson   = row.at(21) || '';        // Col V (Route Coord)
 
-              if (!coordJson) continue;
-              let points;
-              try { points = JSON.parse(coordJson); } catch (e) { continue; }
-              if (!Array.isArray(points) || points.length < 2) continue;
+            if (!coordJson) continue;
+            let points;
+            try { points = JSON.parse(coordJson); } catch (e) { continue; }
+            if (!Array.isArray(points) || points.length < 2) continue;
 
-              const timeLeftMin = parseDurationToMinutes(timeLeftStr);
-              const elapsedMin  = parseDurationToMinutes(elapsedStr);
-              const eftMin      = parseDurationToMinutes(eftStr);
+            const timeLeftMin = parseDurationToMinutes(timeLeftStr);
+            const elapsedMin  = parseDurationToMinutes(elapsedStr);
+            const eftMin      = parseDurationToMinutes(eftStr);
 
-              if (timeLeftMin <= 0) continue;
+            if (timeLeftMin <= 0) continue;
 
-              const totalMin = (elapsedMin + timeLeftMin) > 0 ? (elapsedMin + timeLeftMin) : eftMin;
-              if (totalMin <= 0) continue;
-              const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
+            const totalMin = (elapsedMin + timeLeftMin) > 0 ? (elapsedMin + timeLeftMin) : eftMin;
+            if (totalMin <= 0) continue;
+            const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
 
-              const latLngs = points.map(p => new Array(p.lat, p.lon));
+            const latLngs = points.map(p => new Array(p.lat, p.lon));
 
-              L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.7 }).addTo(flightLayer);
+            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.7 }).addTo(flightLayer);
 
-              const totalSegments = points.length - 1;
-              const exactIdx = progress * totalSegments;
-              const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
-              const segFrac = exactIdx - segIdx;
+            const totalSegments = points.length - 1;
+            const exactIdx = progress * totalSegments;
+            const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
+            const segFrac = exactIdx - segIdx;
 
-              const p1 = points.at(segIdx);
-              const p2 = points.at(segIdx + 1);
-              const curLat = p1.lat + (p2.lat - p1.lat) * segFrac;
-              const curLon = p1.lon + (p2.lon - p1.lon) * segFrac;
-              const heading = getBearing(p1.lat, p1.lon, p2.lat, p2.lon);
+            const p1 = points.at(segIdx);
+            const p2 = points.at(segIdx + 1);
+            const curLat = p1.lat + (p2.lat - p1.lat) * segFrac;
+            const curLon = p1.lon + (p2.lon - p1.lon) * segFrac;
+            const heading = getBearing(p1.lat, p1.lon, p2.lat, p2.lon);
 
-              const icon = L.divIcon({
-                className: 'plane-icon',
-                html: `<div style="transform: rotate(${heading - 45}deg);">✈️</div>`,
-                iconSize: new Array(24, 24),
-                iconAnchor: new Array(12, 12)
-              });
+            const icon = L.divIcon({
+              className: 'plane-icon',
+              html: `<div style="transform: rotate(${heading - 45}deg);">✈️</div>`,
+              iconSize: new Array(24, 24),
+              iconAnchor: new Array(12, 12)
+            });
 
-              L.marker(new Array(curLat, curLon), { icon })
-                .bindPopup(`
-                  <div class="popup-header">${callsign} • ${dep} ➔ ${arr}</div>
-                  <div class="popup-row"><b>Pilot:</b> ${pilot}</div>
-                  <div class="popup-row"><b>Aircraft:</b> ${aircraft} (${regNo})</div>
-                  <div class="popup-row"><b>Livery:</b> ${livery}</div>
-                  <div class="popup-row"><b>Elapsed / Left:</b> ${elapsedStr} / ${timeLeftStr} (${Math.round(progress * 100)}%)</div>
-                `)
-                .addTo(flightLayer);
+            L.marker(new Array(curLat, curLon), { icon })
+              .bindPopup(`
+                <div class="popup-header">${callsign} • ${dep} ➔ ${arr}</div>
+                <div class="popup-row"><b>Pilot:</b> ${pilot}</div>
+                <div class="popup-row"><b>Aircraft:</b> ${aircraft} (${regNo})</div>
+                <div class="popup-row"><b>Livery:</b> ${livery}</div>
+                <div class="popup-row"><b>Elapsed / Left:</b> ${elapsedStr} / ${timeLeftStr} (${Math.round(progress * 100)}%)</div>
+              `)
+              .addTo(flightLayer);
 
-              activeCount++;
-            }
-
-            badge.textContent = activeCount + (activeCount === 1 ? ' Active Flight' : ' Active Flights');
-          },
-          error: function(err) {
-            badge.textContent = 'Sheet CSV Error: Check Publish-to-Web link';
+            activeCount++;
           }
-        });
+
+          badge.textContent = activeCount + (activeCount === 1 ? ' Active Flight' : ' Active Flights');
+        } catch (err) {
+          badge.textContent = 'Sheet CSV Error: ' + err.message;
+        }
       }
 
       updateFlights();
