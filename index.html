@@ -4,9 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VA Live Flight Radar</title>
-  <link rel="stylesheet" href="https://unpkg.com" />
+  <link rel="stylesheet" href="https://jsdelivr.net" />
   <style>
     html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #0f172a; font-family: system-ui, -apple-system, sans-serif; }
+    .leaflet-tile-pane { filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(90%); }
     .plane-icon { font-size: 22px; text-align: center; line-height: 24px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)); }
     .leaflet-popup-content-wrapper { background: #1e293b; color: #f8fafc; border-radius: 8px; border: 1px solid #334155; }
     .leaflet-popup-tip { background: #1e293b; }
@@ -15,10 +16,9 @@
     .popup-row b { color: #f8fafc; }
     .radar-badge {
       position: absolute; top: 12px; right: 12px; z-index: 1000;
-      background: rgba(15, 23, 42, 0.88); color: #38bdf8;
+      background: rgba(15, 23, 42, 0.92); color: #38bdf8;
       border: 1px solid #334155; border-radius: 6px;
-      padding: 6px 12px; font-size: 12px; font-weight: 600;
-      backdrop-filter: blur(4px);
+      padding: 8px 14px; font-size: 12px; font-weight: 600;
     }
   </style>
 </head>
@@ -26,130 +26,144 @@
   <div id="map"></div>
   <div class="radar-badge" id="flight-counter">Loading radar...</div>
 
-  <script src="https://unpkg.com"></script>
-  <script src="https://unpkg.com"></script>
+  <script src="https://jsdelivr.net"></script>
+  <script src="https://jsdelivr.net"></script>
   <script>
-    // PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINK HERE:
-    const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
+    window.addEventListener('load', function() {
+      const badge = document.getElementById('flight-counter');
 
-    const map = L.map('map').setView(new Array(15.0, 20.0), 3);
-    L.tileLayer('https://{s}://{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      maxZoom: 18
-    }).addTo(map);
+      // PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINK HERE:
+      const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
 
-    const flightLayer = L.layerGroup().addTo(map);
-
-    function parseDurationToMinutes(val) {
-      if (!val) return 0;
-      const str = String(val).trim();
-      if (str.includes(':')) {
-        const parts = str.split(':').map(Number);
-        if (parts.length === 3) return (parts.at(0) * 60) + parts.at(1) + (parts.at(2) / 60);
-        if (parts.length === 2) return (parts.at(0) * 60) + parts.at(1);
+      if (typeof L === 'undefined') {
+        badge.textContent = 'Error: Leaflet blocked—check adblocker/VPN';
+        return;
       }
-      const num = parseFloat(str);
-      return isNaN(num) ? 0 : num * 60;
-    }
 
-    function getBearing(lat1, lon1, lat2, lon2) {
-      const toRad = d => d * Math.PI / 180;
-      const toDeg = r => r * 180 / Math.PI;
-      const dLon = toRad(lon2 - lon1);
-      const y = Math.sin(dLon) * Math.cos(toRad(lat2));
-      const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
-      return (toDeg(Math.atan2(y, x)) + 360) % 360;
-    }
+      const map = L.map('map').setView(new Array(15.0, 20.0), 3);
+      L.tileLayer('https://openstreetmap.org{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 18
+      }).addTo(map);
 
-    function updateFlights() {
-      const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+      const flightLayer = L.layerGroup().addTo(map);
+      badge.textContent = 'Map loaded. Syncing flights...';
 
-      Papa.parse(url, {
-        download: true,
-        header: false,
-        complete: function(results) {
-          flightLayer.clearLayers();
-          const rows = results.data;
-          let activeCount = 0;
-
-          for (let i = 1; i < rows.length; i++) {
-            const row = rows.at(i);
-            if (!row || row.length < 22) continue;
-
-            const pilot       = row.at(1)  || 'Unknown'; // Col B
-            const callsign    = row.at(2)  || 'N/A';     // Col C
-            const aircraft    = row.at(3)  || '';        // Col D
-            const regNo       = row.at(4)  || '';        // Col E
-            const livery      = row.at(5)  || '';        // Col F
-            const dep         = row.at(6)  || '';        // Col G
-            const arr         = row.at(7)  || '';        // Col H
-            const eftStr      = row.at(8)  || '';        // Col I
-            const timeLeftStr = row.at(13) || '';        // Col N (Dynamic ETE)
-            const elapsedStr  = row.at(14) || '';        // Col O (Elapsed Time)
-            const coordJson   = row.at(21) || '';        // Col V (Route Coord)
-
-            if (!coordJson) continue;
-            let points;
-            try { points = JSON.parse(coordJson); } catch (e) { continue; }
-            if (!Array.isArray(points) || points.length < 2) continue;
-
-            const timeLeftMin = parseDurationToMinutes(timeLeftStr);
-            const elapsedMin  = parseDurationToMinutes(elapsedStr);
-            const eftMin      = parseDurationToMinutes(eftStr);
-
-            if (timeLeftMin <= 0) continue;
-
-            const totalMin = (elapsedMin + timeLeftMin) > 0 ? (elapsedMin + timeLeftMin) : eftMin;
-            if (totalMin <= 0) continue;
-            const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
-
-            const latLngs = points.map(p => new Array(p.lat, p.lon));
-
-            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.7 }).addTo(flightLayer);
-
-            const totalSegments = points.length - 1;
-            const exactIdx = progress * totalSegments;
-            const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
-            const segFrac = exactIdx - segIdx;
-
-            const p1 = points.at(segIdx);
-            const p2 = points.at(segIdx + 1);
-            const curLat = p1.lat + (p2.lat - p1.lat) * segFrac;
-            const curLon = p1.lon + (p2.lon - p1.lon) * segFrac;
-            const heading = getBearing(p1.lat, p1.lon, p2.lat, p2.lon);
-
-            const icon = L.divIcon({
-              className: 'plane-icon',
-              html: `<div style="transform: rotate(${heading - 45}deg);">✈️</div>`,
-              iconSize: new Array(24, 24),
-              iconAnchor: new Array(12, 12)
-            });
-
-            L.marker(new Array(curLat, curLon), { icon })
-              .bindPopup(`
-                <div class="popup-header">${callsign} • ${dep} ➔ ${arr}</div>
-                <div class="popup-row"><b>Pilot:</b> ${pilot}</div>
-                <div class="popup-row"><b>Aircraft:</b> ${aircraft} (${regNo})</div>
-                <div class="popup-row"><b>Livery:</b> ${livery}</div>
-                <div class="popup-row"><b>Elapsed / Left:</b> ${elapsedStr} / ${timeLeftStr} (${Math.round(progress * 100)}%)</div>
-              `)
-              .addTo(flightLayer);
-
-            activeCount++;
-          }
-
-          document.getElementById('flight-counter').textContent =
-            activeCount + (activeCount === 1 ? ' Active Flight' : ' Active Flights');
-        },
-        error: function(err) {
-          document.getElementById('flight-counter').textContent = 'Sheet CSV Error';
+      function parseDurationToMinutes(val) {
+        if (!val) return 0;
+        const str = String(val).trim();
+        if (str.includes(':')) {
+          const parts = str.split(':').map(Number);
+          if (parts.length === 3) return (parts.at(0) * 60) + parts.at(1) + (parts.at(2) / 60);
+          if (parts.length === 2) return (parts.at(0) * 60) + parts.at(1);
         }
-      });
-    }
+        const num = parseFloat(str);
+        return isNaN(num) ? 0 : num * 60;
+      }
 
-    updateFlights();
-    setInterval(updateFlights, 15000);
+      function getBearing(lat1, lon1, lat2, lon2) {
+        const toRad = d => d * Math.PI / 180;
+        const toDeg = r => r * 180 / Math.PI;
+        const dLon = toRad(lon2 - lon1);
+        const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+        const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                  Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+        return (toDeg(Math.atan2(y, x)) + 360) % 360;
+      }
+
+      function updateFlights() {
+        if (!SHEET_CSV_URL.startsWith('http')) {
+          badge.textContent = 'Error: Paste your Google Sheet CSV URL in index.html';
+          return;
+        }
+
+        const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+
+        Papa.parse(url, {
+          download: true,
+          header: false,
+          complete: function(results) {
+            flightLayer.clearLayers();
+            const rows = results.data;
+            let activeCount = 0;
+
+            for (let i = 1; i < rows.length; i++) {
+              const row = rows.at(i);
+              if (!row || row.length < 22) continue;
+
+              const pilot       = row.at(1)  || 'Unknown'; // Col B
+              const callsign    = row.at(2)  || 'N/A';     // Col C
+              const aircraft    = row.at(3)  || '';        // Col D
+              const regNo       = row.at(4)  || '';        // Col E
+              const livery      = row.at(5)  || '';        // Col F
+              const dep         = row.at(6)  || '';        // Col G
+              const arr         = row.at(7)  || '';        // Col H
+              const eftStr      = row.at(8)  || '';        // Col I
+              const timeLeftStr = row.at(13) || '';        // Col N (Dynamic ETE)
+              const elapsedStr  = row.at(14) || '';        // Col O (Elapsed Time)
+              const coordJson   = row.at(21) || '';        // Col V (Route Coord)
+
+              if (!coordJson) continue;
+              let points;
+              try { points = JSON.parse(coordJson); } catch (e) { continue; }
+              if (!Array.isArray(points) || points.length < 2) continue;
+
+              const timeLeftMin = parseDurationToMinutes(timeLeftStr);
+              const elapsedMin  = parseDurationToMinutes(elapsedStr);
+              const eftMin      = parseDurationToMinutes(eftStr);
+
+              if (timeLeftMin <= 0) continue;
+
+              const totalMin = (elapsedMin + timeLeftMin) > 0 ? (elapsedMin + timeLeftMin) : eftMin;
+              if (totalMin <= 0) continue;
+              const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
+
+              const latLngs = points.map(p => new Array(p.lat, p.lon));
+
+              L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.7 }).addTo(flightLayer);
+
+              const totalSegments = points.length - 1;
+              const exactIdx = progress * totalSegments;
+              const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
+              const segFrac = exactIdx - segIdx;
+
+              const p1 = points.at(segIdx);
+              const p2 = points.at(segIdx + 1);
+              const curLat = p1.lat + (p2.lat - p1.lat) * segFrac;
+              const curLon = p1.lon + (p2.lon - p1.lon) * segFrac;
+              const heading = getBearing(p1.lat, p1.lon, p2.lat, p2.lon);
+
+              const icon = L.divIcon({
+                className: 'plane-icon',
+                html: `<div style="transform: rotate(${heading - 45}deg);">✈️</div>`,
+                iconSize: new Array(24, 24),
+                iconAnchor: new Array(12, 12)
+              });
+
+              L.marker(new Array(curLat, curLon), { icon })
+                .bindPopup(`
+                  <div class="popup-header">${callsign} • ${dep} ➔ ${arr}</div>
+                  <div class="popup-row"><b>Pilot:</b> ${pilot}</div>
+                  <div class="popup-row"><b>Aircraft:</b> ${aircraft} (${regNo})</div>
+                  <div class="popup-row"><b>Livery:</b> ${livery}</div>
+                  <div class="popup-row"><b>Elapsed / Left:</b> ${elapsedStr} / ${timeLeftStr} (${Math.round(progress * 100)}%)</div>
+                `)
+                .addTo(flightLayer);
+
+              activeCount++;
+            }
+
+            badge.textContent = activeCount + (activeCount === 1 ? ' Active Flight' : ' Active Flights');
+          },
+          error: function(err) {
+            badge.textContent = 'Sheet CSV Error: Check Publish-to-Web link';
+          }
+        });
+      }
+
+      updateFlights();
+      setInterval(updateFlights, 15000);
+    });
   </script>
 </body>
 </html>
