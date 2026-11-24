@@ -23,12 +23,22 @@
 </head>
 <body>
   <div id="map"></div>
-  <div class="radar-badge" id="flight-counter">Loading radar...</div>
+  <div class="radar-badge" id="flight-counter">Initializing...</div>
 
   <script src="./leaflet.js"></script>
   <script>
-    window.addEventListener('load', async function() {
+    window.onerror = function(msg, url, line) {
+      const b = document.getElementById('flight-counter');
+      if (b) b.textContent = 'JS Error (Line ' + line + '): ' + msg;
+    };
+
+    (async function() {
       const badge = document.getElementById('flight-counter');
+
+      if (typeof L === 'undefined') {
+        badge.textContent = 'Error: leaflet.js failed to load';
+        return;
+      }
 
       const sheetHost = 'docs' + '.google.com';
       const sheetPath = '/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
@@ -196,7 +206,8 @@
 
       async function updateFlights() {
         try {
-          const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+          badge.textContent = 'Fetching flights...';
+          const url = SHEET_CSV_URL + '&t=' + Date.now();
           const resp = await fetch(url);
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
           const csvText = await resp.text();
@@ -232,10 +243,3 @@
 
             if (timeLeftMin <= 0) continue;
 
-            const totalMin = (elapsedMin + timeLeftMin) > 0 ? (elapsedMin + timeLeftMin) : eftMin;
-            if (totalMin <= 0) continue;
-            const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
-
-            activeCount++;
-            const points = filterOutlierWaypoints(rawPoints);
-            const built = buildCurvedRoute(points);
