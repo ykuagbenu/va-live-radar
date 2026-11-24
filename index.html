@@ -27,7 +27,7 @@
 
   <script src="./leaflet.js"></script>
   <script>
-    (async function initRadar() {
+    window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
 
       const sheetHost = 'docs' + '.google.com';
@@ -106,7 +106,6 @@
         return toDeg(d);
       }
 
-      // Filter out any stray guessed waypoint that jumps wildly off the flight path
       function filterOutlierWaypoints(rawPoints) {
         if (rawPoints.length <= 2) return rawPoints;
         const dep = rawPoints.at(0);
@@ -239,3 +238,4 @@
 
             activeCount++;
             const points = filterOutlierWaypoints(rawPoints);
+            const built = buildCurvedRoute(points);
