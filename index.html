@@ -13,54 +13,36 @@
     .popup-header { font-size: 14px; font-weight: 700; color: #38bdf8; margin-bottom: 4px; }
     .popup-row { font-size: 12px; line-height: 1.5; color: #cbd5e1; }
     .popup-row b { color: #f8fafc; }
-    .radar-badge {
-      position: absolute; top: 12px; right: 12px; z-index: 1000;
-      background: rgba(15, 23, 42, 0.92); color: #38bdf8;
-      border: 1px solid #334155; border-radius: 6px;
-      padding: 8px 14px; font-size: 12px; font-weight: 600;
-    }
+    .radar-badge { position: absolute; top: 12px; right: 12px; z-index: 1000; background: rgba(15, 23, 42, 0.92); color: #38bdf8; border: 1px solid #334155; border-radius: 6px; padding: 8px 14px; font-size: 12px; font-weight: 600; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div class="radar-badge" id="flight-counter">Loading radar...</div>
-
   <script src="./leaflet.js"></script>
   <script>
     window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
-
-      // PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINK BETWEEN THE SINGLE QUOTES ON THE LINE BELOW:
       const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
-
-      const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
+      const map = L.map('map', { worldCopyJump: true }).setView([15.0, 20.0], 2);
 
       try {
         const geoResp = await fetch('./world.geojson');
         if (geoResp.ok) {
-          const worldData = await geoResp.json();
-          L.geoJSON(worldData, {
-            style: {
-              fillColor: '#1e293b',
-              fillOpacity: 1,
-              color: '#334155',
-              weight: 1
-            }
-          }).addTo(map);
+          L.geoJSON(await geoResp.json(), { style: { fillColor: '#1e293b', fillOpacity: 1, color: '#334155', weight: 1 } }).addTo(map);
         }
-      } catch (geoErr) {
-        console.warn('Could not load world.geojson:', geoErr);
-      }
+      } catch (e) {}
 
       const flightLayer = L.layerGroup().addTo(map);
+      const toRad = d => d * Math.PI / 180;
+      const toDeg = r => r * 180 / Math.PI;
 
       function parseCSV(text) {
-        const rows = [];
-        let row = [], cur = '', inQuotes = false;
+        const rows = []; let row = [], cur = '', inQuotes = false;
         for (let i = 0; i < text.length; i++) {
           const ch = text.charAt(i), next = text.charAt(i + 1);
           if (ch === '"' && inQuotes && next === '"') { cur += '"'; i++; }
-          else if (ch === '"') { inQuotes = !inQuotes; }
+          else if (ch === '"') inQuotes = !inQuotes;
           else if (ch === ',' && !inQuotes) { row.push(cur); cur = ''; }
           else if ((ch === '\r' || ch === '\n') && !inQuotes) {
             if (ch === '\r' && next === '\n') i++;
@@ -71,88 +53,44 @@
         return rows;
       }
 
-      function parseDurationToMinutes(val) {
+      function toMins(val) {
         if (!val) return 0;
-        const str = String(val).trim();
-        if (str.includes(':')) {
-          const parts = str.split(':').map(Number);
-          if (parts.length === 3) return (parts.at(0) * 60) + parts.at(1) + (parts.at(2) / 60);
-          if (parts.length === 2) return (parts.at(0) * 60) + parts.at(1);
+        const s = String(val).trim();
+        if (s.includes(':')) {
+          const p = s.split(':').map(Number);
+          return p.length === 3 ? p.at(0) * 60 + p.at(1) + p.at(2) / 60 : p.at(0) * 60 + p.at(1);
         }
-        const num = parseFloat(str);
-        return isNaN(num) ? 0 : num * 60;
+        const n = parseFloat(s);
+        return isNaN(n) ? 0 : n * 60;
       }
 
-      function getBearing(lat1, lon1, lat2, lon2) {
-        const toRad = d => d * Math.PI / 180;
-        const toDeg = r => r * 180 / Math.PI;
-        const dLon = toRad(lon2 - lon1);
-        const y = Math.sin(dLon) * Math.cos(toRad(lat2));
-        const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-                  Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
-        return (toDeg(Math.atan2(y, x)) + 360) % 360;
+      function angDist(a, b) {
+        const lat1 = toRad(a.lat), lon1 = toRad(a.lon), lat2 = toRad(b.lat), lon2 = toRad(b.lon);
+        return toDeg(2 * Math.asin(Math.sqrt(Math.pow(Math.sin((lat1 - lat2) / 2), 2) + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2))));
       }
 
-      function angularDistanceDeg(p1, p2) {
-        const toRad = d => d * Math.PI / 180;
-        const toDeg = r => r * 180 / Math.PI;
-        const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon);
-        const lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
-        const d = 2 * Math.asin(Math.sqrt(
-          Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
-          Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2)
-        ));
-        return toDeg(d);
-      }
-
-      function filterOutlierWaypoints(rawPoints) {
-        if (rawPoints.length <= 2) return rawPoints;
-        const dep = rawPoints.at(0);
-        const arr = rawPoints.at(rawPoints.length - 1);
-        const totalSpan = Math.max(angularDistanceDeg(dep, arr), 20);
-        const maxJump = Math.min(Math.max(totalSpan * 0.65, 25), 75);
-
-        const cleaned = [dep];
-        for (let i = 1; i < rawPoints.length - 1; i++) {
-          const pt = rawPoints.at(i);
-          const prev = cleaned.at(cleaned.length - 1);
-          const jumpFromPrev = angularDistanceDeg(prev, pt);
-          const distToArr = angularDistanceDeg(pt, arr);
-          if (jumpFromPrev <= maxJump && distToArr <= totalSpan * 1.25) {
-            cleaned.push(pt);
-          }
+      function curveRoute(rawPts) {
+        const dep = rawPts.at(0), arr = rawPts.at(rawPts.length - 1);
+        const span = Math.max(angDist(dep, arr), 20);
+        const maxJump = Math.min(Math.max(span * 0.65, 25), 75);
+        const clean = [dep];
+        for (let i = 1; i < rawPts.length - 1; i++) {
+          const pt = rawPts.at(i), prev = clean.at(clean.length - 1);
+          if (angDist(prev, pt) <= maxJump && angDist(pt, arr) <= span * 1.25) clean.push(pt);
         }
-        cleaned.push(arr);
-        return cleaned;
-      }
+        clean.push(arr);
 
-      function curveRoutePoints(pts) {
-        const toRad = d => d * Math.PI / 180;
-        const toDeg = r => r * 180 / Math.PI;
-        const out = [];
-        let lonShift = 0;
-
-        for (let i = 0; i < pts.length - 1; i++) {
-          const p1 = pts.at(i);
-          const p2 = pts.at(i + 1);
-          const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon);
-          const lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
-          const d = 2 * Math.asin(Math.sqrt(
-            Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
-            Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2)
-          ));
-
-          const steps = 16;
-          for (let s = 0; s <= steps; s++) {
+        const out = []; let lonShift = 0;
+        for (let i = 0; i < clean.length - 1; i++) {
+          const p1 = clean.at(i), p2 = clean.at(i + 1);
+          const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon), lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
+          const d = toRad(angDist(p1, p2));
+          for (let s = 0; s <= 16; s++) {
             if (i > 0 && s === 0) continue;
-            const f = s / steps;
-            let lat, lon;
-            if (d < 1e-6) {
-              lat = p1.lat;
-              lon = p1.lon;
-            } else {
-              const A = Math.sin((1 - f) * d) / Math.sin(d);
-              const B = Math.sin(f * d) / Math.sin(d);
+            const f = s / 16;
+            let lat = p1.lat, lon = p1.lon;
+            if (d > 1e-6) {
+              const A = Math.sin((1 - f) * d) / Math.sin(d), B = Math.sin(f * d) / Math.sin(d);
               const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
               const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
               const z = A * Math.sin(lat1) + B * Math.sin(lat2);
@@ -160,80 +98,67 @@
               lon = toDeg(Math.atan2(y, x));
             }
             if (out.length > 0) {
-              const prevLon = out.at(out.length - 1).lon;
-              const diff = (lon + lonShift) - prevLon;
+              const diff = (lon + lonShift) - out.at(out.length - 1).lon;
               if (diff > 180) lonShift -= 360;
               else if (diff < -180) lonShift += 360;
             }
             out.push({ lat: lat, lon: lon + lonShift });
           }
         }
-        return out;
+        return { path: out, wps: clean };
       }
 
       async function updateFlights() {
-        if (!SHEET_CSV_URL.startsWith('http')) {
-          badge.textContent = 'Error: Paste your Google Sheet CSV URL in index.html';
-          return;
-        }
-
         try {
-          const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
-          const resp = await fetch(url);
+          const resp = await fetch(SHEET_CSV_URL + '&t=' + Date.now());
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
-          const csvText = await resp.text();
-          const rows = parseCSV(csvText);
-
+          const rows = parseCSV(await resp.text());
           flightLayer.clearLayers();
           let activeCount = 0;
 
           for (let i = 1; i < rows.length; i++) {
-            const row = rows.at(i);
-            if (!row || row.length < 22) continue;
+            const r = rows.at(i);
+            if (!r || r.length < 22 || !r.at(21)) continue;
+            let raw; try { raw = JSON.parse(r.at(21)); } catch (e) { continue; }
+            if (!Array.isArray(raw) || raw.length < 2) continue;
 
-            const pilot       = row.at(1)  || 'Unknown';
-            const callsign    = row.at(2)  || 'N/A';
-            const aircraft    = row.at(3)  || '';
-            const regNo       = row.at(4)  || '';
-            const livery      = row.at(5)  || '';
-            const dep         = row.at(6)  || '';
-            const arr         = row.at(7)  || '';
-            const eftStr      = row.at(8)  || '';
-            const timeLeftStr = row.at(13) || '';
-            const elapsedStr  = row.at(14) || '';
-            const coordJson   = row.at(21) || '';
-
-            if (!coordJson) continue;
-            let rawPoints;
-            try { rawPoints = JSON.parse(coordJson); } catch (e) { continue; }
-            if (!Array.isArray(rawPoints) || rawPoints.length < 2) continue;
-
-            const timeLeftMin = parseDurationToMinutes(timeLeftStr);
-            const elapsedMin  = parseDurationToMinutes(elapsedStr);
-            const eftMin      = parseDurationToMinutes(eftStr);
-
-            if (timeLeftMin <= 0) continue;
-
-            const totalMin = (elapsedMin + timeLeftMin) > 0 ? (elapsedMin + timeLeftMin) : eftMin;
-            if (totalMin <= 0) continue;
-            const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
+            const leftMin = toMins(r.at(13)), elapMin = toMins(r.at(14)), eftMin = toMins(r.at(8));
+            if (leftMin <= 0) continue;
+            const totMin = (elapMin + leftMin) > 0 ? (elapMin + leftMin) : eftMin;
+            if (totMin <= 0) continue;
+            const prog = Math.min(Math.max(elapMin / totMin, 0), 1);
 
             activeCount++;
-            const cleanWaypoints = filterOutlierWaypoints(rawPoints);
-            const points = curveRoutePoints(cleanWaypoints);
-            const latLngs = points.map(p => new Array(p.lat, p.lon));
-            const startPt = points.at(0);
-            const endPt   = points.at(points.length - 1);
+            const built = curveRoute(raw);
+            const pts = built.path, wps = built.wps;
+            const latLngs = pts.map(p => [p.lat, p.lon]);
 
-            L.circleMarker(new Array(startPt.lat, startPt.lon), {
-              radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1
-            }).bindTooltip('DEP: ' + dep).addTo(flightLayer);
+            L.circleMarker([pts.at(0).lat, pts.at(0).lon], { radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 }).bindTooltip('DEP: ' + r.at(6)).addTo(flightLayer);
+            L.circleMarker([pts.at(pts.length - 1).lat, pts.at(pts.length - 1).lon], { radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1 }).bindTooltip('ARR: ' + r.at(7)).addTo(flightLayer);
+            for (let w = 1; w < wps.length - 1; w++) {
+              L.circleMarker([wps.at(w).lat, wps.at(w).lon], { radius: 2.5, color: '#7dd3fc', fillColor: '#7dd3fc', fillOpacity: 0.75 }).bindTooltip(wps.at(w).ident).addTo(flightLayer);
+            }
+            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.8 }).addTo(flightLayer);
 
-            L.circleMarker(new Array(endPt.lat, endPt.lon), {
-              radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1
-            }).bindTooltip('ARR: ' + arr).addTo(flightLayer);
+            const exact = prog * (pts.length - 1);
+            const idx = Math.min(Math.floor(exact), pts.length - 2), frac = exact - idx;
+            const p1 = pts.at(idx), p2 = pts.at(idx + 1);
+            const cLat = p1.lat + (p2.lat - p1.lat) * frac, cLon = p1.lon + (p2.lon - p1.lon) * frac;
+            const dLon = toRad(p2.lon - p1.lon);
+            const hdg = (toDeg(Math.atan2(Math.sin(dLon) * Math.cos(toRad(p2.lat)), Math.cos(toRad(p1.lat)) * Math.sin(toRad(p2.lat)) - Math.sin(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) * Math.cos(dLon))) + 360) % 360;
 
-            if (cleanWaypoints.length > 2) {
-              for (let w = 1; w < cleanWaypoints.length - 1; w++) {
-                const wp = cleanWaypoints.at(w);
-                L.circleMarker(new Array(wp.lat, wp.lon), {
+            const icon = L.divIcon({ className: 'plane-icon', html: `<div style="transform: rotate(${hdg - 45}deg);">✈️</div>`, iconSize:, iconAnchor: [12, 12] });
+            L.marker([cLat, cLon], { icon: icon }).bindPopup(`<div class="popup-header">${r.at(2)} • ${r.at(6)} ➔ ${r.at(7)}</div><div class="popup-row"><b>Pilot:</b> ${r.at(1)}</div><div class="popup-row"><b>Aircraft:</b> ${r.at(3)} (${r.at(4)})</div><div class="popup-row"><b>Livery:</b> ${r.at(5)}</div><div class="popup-row"><b>Elapsed / Left:</b> ${r.at(14)} / ${r.at(13)} (${Math.round(prog * 100)}%)</div>`).addTo(flightLayer);
+          }
+          badge.textContent = `${activeCount} Active Flight${activeCount === 1 ? '' : 's'}`;
+        } catch (err) {
+          badge.textContent = 'Radar feed error';
+        }
+      }
+
+      await updateFlights();
+      setInterval(updateFlights, 60000);
+    });
+  </script>
+</body>
+</html>
