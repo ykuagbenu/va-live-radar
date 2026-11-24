@@ -23,26 +23,15 @@
 </head>
 <body>
   <div id="map"></div>
-  <div class="radar-badge" id="flight-counter">Initializing...</div>
+  <div class="radar-badge" id="flight-counter">Loading radar...</div>
 
   <script src="./leaflet.js"></script>
   <script>
-    window.onerror = function(msg, url, line) {
-      const b = document.getElementById('flight-counter');
-      if (b) b.textContent = 'JS Error (Line ' + line + '): ' + msg;
-    };
-
-    (async function() {
+    window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
 
-      if (typeof L === 'undefined') {
-        badge.textContent = 'Error: leaflet.js failed to load';
-        return;
-      }
-
-      const sheetHost = 'docs' + '.google.com';
-      const sheetPath = '/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
-      const SHEET_CSV_URL = 'https://' + sheetHost + sheetPath;
+      // PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINK BETWEEN THE SINGLE QUOTES ON THE LINE BELOW:
+      const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
 
       const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
 
@@ -66,8 +55,8 @@
       const flightLayer = L.layerGroup().addTo(map);
 
       function parseCSV(text) {
-        const rows = new Array();
-        let row = new Array(), cur = '', inQuotes = false;
+        const rows = [];
+        let row = [], cur = '', inQuotes = false;
         for (let i = 0; i < text.length; i++) {
           const ch = text.charAt(i), next = text.charAt(i + 1);
           if (ch === '"' && inQuotes && next === '"') { cur += '"'; i++; }
@@ -75,7 +64,7 @@
           else if (ch === ',' && !inQuotes) { row.push(cur); cur = ''; }
           else if ((ch === '\r' || ch === '\n') && !inQuotes) {
             if (ch === '\r' && next === '\n') i++;
-            row.push(cur); rows.push(row); row = new Array(); cur = '';
+            row.push(cur); rows.push(row); row = []; cur = '';
           } else { cur += ch; }
         }
         if (cur.length > 0 || row.length > 0) { row.push(cur); rows.push(row); }
@@ -123,7 +112,7 @@
         const totalSpan = Math.max(angularDistanceDeg(dep, arr), 20);
         const maxJump = Math.min(Math.max(totalSpan * 0.65, 25), 75);
 
-        const cleaned = new Array(dep);
+        const cleaned = [dep];
         for (let i = 1; i < rawPoints.length - 1; i++) {
           const pt = rawPoints.at(i);
           const prev = cleaned.at(cleaned.length - 1);
@@ -137,77 +126,59 @@
         return cleaned;
       }
 
-      function getGreatCircleSegment(p1, p2, numSteps) {
-        const steps = numSteps || 16;
+      function curveRoutePoints(pts) {
         const toRad = d => d * Math.PI / 180;
         const toDeg = r => r * 180 / Math.PI;
-        const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon);
-        const lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
+        const out = [];
+        let lonShift = 0;
 
-        const d = 2 * Math.asin(Math.sqrt(
-          Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
-          Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2)
-        ));
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p1 = pts.at(i);
+          const p2 = pts.at(i + 1);
+          const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon);
+          const lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
+          const d = 2 * Math.asin(Math.sqrt(
+            Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
+            Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2)
+          ));
 
-        if (d < 1e-6) return new Array(new Array(p1.lat, p1.lon), new Array(p2.lat, p2.lon));
-
-        const coords = new Array();
-        let prevLon = p1.lon;
-        let lonOffset = 0;
-
-        for (let i = 0; i <= steps; i++) {
-          const f = i / steps;
-          const A = Math.sin((1 - f) * d) / Math.sin(d);
-          const B = Math.sin(f * d) / Math.sin(d);
-          const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
-          const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
-          const z = A * Math.sin(lat1) + B * Math.sin(lat2);
-
-          const lat = toDeg(Math.atan2(z, Math.sqrt(x * x + y * y)));
-          let lon = toDeg(Math.atan2(y, x));
-
-          if (i > 0) {
-            const diff = (lon + lonOffset) - prevLon;
-            if (diff > 180) lonOffset -= 360;
-            else if (diff < -180) lonOffset += 360;
-          }
-          lon += lonOffset;
-          prevLon = lon;
-          coords.push(new Array(lat, lon));
-        }
-        return coords;
-      }
-
-      function buildCurvedRoute(waypoints) {
-        let fullPath = new Array();
-        const alignedWaypoints = new Array();
-
-        for (let i = 0; i < waypoints.length - 1; i++) {
-          const seg = getGreatCircleSegment(waypoints.at(i), waypoints.at(i + 1), 16);
-          if (i > 0) {
-            const prevEndLon = fullPath.at(fullPath.length - 1).at(1);
-            const segStartLon = seg.at(0).at(1);
-            const shift = Math.round((prevEndLon - segStartLon) / 360) * 360;
-            for (let k = 0; k < seg.length; k++) {
-              const pt = seg.at(k);
-              pt.splice(1, 1, pt.at(1) + shift);
+          const steps = 16;
+          for (let s = 0; s <= steps; s++) {
+            if (i > 0 && s === 0) continue;
+            const f = s / steps;
+            let lat, lon;
+            if (d < 1e-6) {
+              lat = p1.lat;
+              lon = p1.lon;
+            } else {
+              const A = Math.sin((1 - f) * d) / Math.sin(d);
+              const B = Math.sin(f * d) / Math.sin(d);
+              const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+              const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+              const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+              lat = toDeg(Math.atan2(z, Math.sqrt(x * x + y * y)));
+              lon = toDeg(Math.atan2(y, x));
             }
-            seg.shift();
+            if (out.length > 0) {
+              const prevLon = out.at(out.length - 1).lon;
+              const diff = (lon + lonShift) - prevLon;
+              if (diff > 180) lonShift -= 360;
+              else if (diff < -180) lonShift += 360;
+            }
+            out.push({ lat: lat, lon: lon + lonShift });
           }
-          if (i === 0) {
-            alignedWaypoints.push({ ident: waypoints.at(0).ident, lat: seg.at(0).at(0), lon: seg.at(0).at(1) });
-          }
-          const lastPt = seg.at(seg.length - 1);
-          alignedWaypoints.push({ ident: waypoints.at(i + 1).ident, lat: lastPt.at(0), lon: lastPt.at(1) });
-          fullPath = fullPath.concat(seg);
         }
-        return { path: fullPath, alignedWaypoints: alignedWaypoints };
+        return out;
       }
 
       async function updateFlights() {
+        if (!SHEET_CSV_URL.startsWith('http')) {
+          badge.textContent = 'Error: Paste your Google Sheet CSV URL in index.html';
+          return;
+        }
+
         try {
-          badge.textContent = 'Fetching flights...';
-          const url = SHEET_CSV_URL + '&t=' + Date.now();
+          const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
           const resp = await fetch(url);
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
           const csvText = await resp.text();
@@ -243,3 +214,26 @@
 
             if (timeLeftMin <= 0) continue;
 
+            const totalMin = (elapsedMin + timeLeftMin) > 0 ? (elapsedMin + timeLeftMin) : eftMin;
+            if (totalMin <= 0) continue;
+            const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
+
+            activeCount++;
+            const cleanWaypoints = filterOutlierWaypoints(rawPoints);
+            const points = curveRoutePoints(cleanWaypoints);
+            const latLngs = points.map(p => new Array(p.lat, p.lon));
+            const startPt = points.at(0);
+            const endPt   = points.at(points.length - 1);
+
+            L.circleMarker(new Array(startPt.lat, startPt.lon), {
+              radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1
+            }).bindTooltip('DEP: ' + dep).addTo(flightLayer);
+
+            L.circleMarker(new Array(endPt.lat, endPt.lon), {
+              radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1
+            }).bindTooltip('ARR: ' + arr).addTo(flightLayer);
+
+            if (cleanWaypoints.length > 2) {
+              for (let w = 1; w < cleanWaypoints.length - 1; w++) {
+                const wp = cleanWaypoints.at(w);
+                L.circleMarker(new Array(wp.lat, wp.lon), {
