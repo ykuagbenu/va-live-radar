@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="./leaflet.css" />
   <style>
     html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #090e1a; font-family: system-ui, -apple-system, sans-serif; }
-    .plane-icon { font-size: 22px; text-align: center; line-height: 24px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)); }
+    .plane-icon { font-size: 22px; text-align: center; line-height: 24px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85)); cursor: pointer; }
     .leaflet-popup-content-wrapper { background: #1e293b; color: #f8fafc; border-radius: 8px; border: 1px solid #334155; }
     .leaflet-popup-tip { background: #1e293b; }
     .popup-header { font-size: 14px; font-weight: 700; color: #38bdf8; margin-bottom: 4px; }
@@ -36,7 +36,15 @@
         }
       } catch (e) {}
 
-      const flightLayer = L.layerGroup().addTo(map);
+      const planeLayer = L.layerGroup().addTo(map);
+      const selectedRouteLayer = L.layerGroup().addTo(map);
+      let selectedFlightId = null;
+
+      map.on('popupclose', function() {
+        selectedFlightId = null;
+        selectedRouteLayer.clearLayers();
+      });
+
       const toRad = d => d * Math.PI / 180;
       const toDeg = r => r * 180 / Math.PI;
 
@@ -95,6 +103,24 @@
         return { path: out, wps: clean };
       }
 
+      function drawFlightRoute(pts, wps, depCode, arrCode) {
+        selectedRouteLayer.clearLayers();
+        const latLngs = pts.map(p => new Array(p.lat, p.lon));
+
+        L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.85 }).addTo(selectedRouteLayer);
+
+        L.circleMarker(new Array(pts.at(0).lat, pts.at(0).lon), { radius: 4.5, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 })
+          .bindTooltip('DEP: ' + depCode).addTo(selectedRouteLayer);
+
+        L.circleMarker(new Array(pts.at(pts.length - 1).lat, pts.at(pts.length - 1).lon), { radius: 4.5, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1 })
+          .bindTooltip('ARR: ' + arrCode).addTo(selectedRouteLayer);
+
+        for (let w = 1; w < wps.length - 1; w++) {
+          L.circleMarker(new Array(wps.at(w).lat, wps.at(w).lon), { radius: 2.5, color: '#7dd3fc', fillColor: '#7dd3fc', fillOpacity: 0.8 })
+            .bindTooltip(wps.at(w).ident).addTo(selectedRouteLayer);
+        }
+      }
+
       async function updateFlights() {
         if (!LIVE_API_URL.startsWith('http')) {
           badge.textContent = 'Error: Paste your Web App URL in index.html';
@@ -106,8 +132,9 @@
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
           const rows = await resp.json();
 
-          flightLayer.clearLayers();
+          planeLayer.clearLayers();
           let activeCount = 0;
+          let stillSelected = false;
 
           for (let i = 1; i < rows.length; i++) {
             const r = rows.at(i);
@@ -122,16 +149,9 @@
             const prog = Math.min(Math.max(elapMin / totMin, 0), 1);
 
             activeCount++;
+            const flightId = r.at(19) || (r.at(2) + '_' + r.at(6) + '_' + r.at(7));
             const built = curveRoute(raw);
             const pts = built.path, wps = built.wps;
-            const latLngs = pts.map(p => new Array(p.lat, p.lon));
-
-            L.circleMarker(new Array(pts.at(0).lat, pts.at(0).lon), { radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 }).bindTooltip('DEP: ' + r.at(6)).addTo(flightLayer);
-            L.circleMarker(new Array(pts.at(pts.length - 1).lat, pts.at(pts.length - 1).lon), { radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1 }).bindTooltip('ARR: ' + r.at(7)).addTo(flightLayer);
-            for (let w = 1; w < wps.length - 1; w++) {
-              L.circleMarker(new Array(wps.at(w).lat, wps.at(w).lon), { radius: 2.5, color: '#7dd3fc', fillColor: '#7dd3fc', fillOpacity: 0.75 }).bindTooltip(wps.at(w).ident).addTo(flightLayer);
-            }
-            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.8 }).addTo(flightLayer);
 
             const exact = prog * (pts.length - 1);
             const idx = Math.min(Math.floor(exact), pts.length - 2), frac = exact - idx;
@@ -141,8 +161,27 @@
             const hdg = (toDeg(Math.atan2(Math.sin(dLon) * Math.cos(toRad(p2.lat)), Math.cos(toRad(p1.lat)) * Math.sin(toRad(p2.lat)) - Math.sin(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) * Math.cos(dLon))) + 360) % 360;
 
             const icon = L.divIcon({ className: 'plane-icon', html: `<div style="transform: rotate(${hdg - 45}deg);">✈️</div>`, iconSize: new Array(24, 24), iconAnchor: new Array(12, 12) });
-            L.marker(new Array(cLat, cLon), { icon: icon }).bindPopup(`<div class="popup-header">${r.at(2)} • ${r.at(6)} ➔ ${r.at(7)}</div><div class="popup-row"><b>Pilot:</b> ${r.at(1)}</div><div class="popup-row"><b>Aircraft:</b> ${r.at(3)} (${r.at(4)})</div><div class="popup-row"><b>Livery:</b> ${r.at(5)}</div><div class="popup-row"><b>Elapsed / Left:</b> ${r.at(14)} / ${r.at(13)} (${Math.round(prog * 100)}%)</div>`).addTo(flightLayer);
+            const marker = L.marker(new Array(cLat, cLon), { icon: icon })
+              .bindPopup(`<div class="popup-header">${r.at(2)} • ${r.at(6)} ➔ ${r.at(7)}</div><div class="popup-row"><b>Pilot:</b> ${r.at(1)}</div><div class="popup-row"><b>Aircraft:</b> ${r.at(3)} (${r.at(4)})</div><div class="popup-row"><b>Livery:</b> ${r.at(5)}</div><div class="popup-row"><b>Elapsed / Left:</b> ${r.at(14)} / ${r.at(13)} (${Math.round(prog * 100)}%)</div>`)
+              .addTo(planeLayer);
+
+            marker.on('click', function() {
+              selectedFlightId = flightId;
+              drawFlightRoute(pts, wps, r.at(6), r.at(7));
+            });
+
+            if (selectedFlightId === flightId) {
+              stillSelected = true;
+              drawFlightRoute(pts, wps, r.at(6), r.at(7));
+              marker.openPopup();
+            }
           }
+
+          if (selectedFlightId && !stillSelected) {
+            selectedFlightId = null;
+            selectedRouteLayer.clearLayers();
+          }
+
           badge.textContent = `${activeCount} Active Flight${activeCount === 1 ? '' : 's'}`;
         } catch (err) {
           badge.textContent = 'Radar feed error';
