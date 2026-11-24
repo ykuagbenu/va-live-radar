@@ -20,12 +20,26 @@
   <div id="map"></div>
   <div class="radar-badge" id="flight-counter">Loading radar...</div>
   <script src="./leaflet.js"></script>
+  <script type="module">
+    // Discord Embedded App SDK handshake (safe when opened outside Discord too)
+    const DISCORD_CLIENT_ID = '1574685828318363739';
+    if (window.location.search.includes('frame_id=') && DISCORD_CLIENT_ID.startsWith('1')) {
+      try {
+        const sdkHost = 'esm' + '.sh';
+        const { DiscordSDK } = await import('https://' + sdkHost + '/@discord/embedded-app-sdk@1.9.0');
+        const discordSdk = new DiscordSDK(DISCORD_CLIENT_ID);
+        await discordSdk.ready();
+      } catch (e) {
+        console.warn('Discord SDK init skipped:', e);
+      }
+    }
+  </script>
   <script>
     window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
 
       // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL (.../exec) BETWEEN THE SINGLE QUOTES BELOW:
-      const LIVE_API_URL = 'https://script.google.com/macros/s/AKfycbz5gHv3EoqpVUevfHUH1vYFMX1UKfRatVu2GXgLeSiBSrPAKlUv2LBjapJrSg5Ghgw/exec';
+      const LIVE_API_URL = 'PASTE_YOUR_WEB_APP_URL_HERE';
 
       const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
 
