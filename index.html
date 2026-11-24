@@ -29,7 +29,10 @@
   <script>
     window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
-      const SHEET_CSV_URL = 'https://google.com';
+
+      const sheetHost = 'docs' + '.google.com';
+      const sheetPath = '/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
+      const SHEET_CSV_URL = 'https://' + sheetHost + sheetPath;
 
       const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
 
@@ -91,9 +94,8 @@
         return (toDeg(Math.atan2(y, x)) + 360) % 360;
       }
 
-      // Compute smooth Great Circle arc between two points
       function getGreatCircleSegment(p1, p2, numSteps) {
-        const steps = numSteps || 20;
+        const steps = numSteps || 16;
         const toRad = d => d * Math.PI / 180;
         const toDeg = r => r * 180 / Math.PI;
         const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon);
@@ -133,7 +135,6 @@
         return coords;
       }
 
-      // Build continuous curved route through all waypoints
       function buildCurvedRoute(waypoints) {
         let fullPath = new Array();
         const alignedWaypoints = new Array();
@@ -187,25 +188,10 @@
             const elapsedStr  = row.at(14) || '';
             const coordJson   = row.at(21) || '';
 
-            let points = new Array();
-            if (coordJson) {
-              try { points = JSON.parse(coordJson); } catch (e) {}
-            }
-
-            // Fallback: read WP1..WP50 columns starting at col index 22
-            if (!Array.isArray(points) || points.length < 2) {
-              points = new Array();
-              for (let c = 22; c + 2 < row.length; c += 3) {
-                const ident = (row.at(c) || '').trim();
-                const lat = parseFloat(row.at(c + 1));
-                const lon = parseFloat(row.at(c + 2));
-                if (ident && !isNaN(lat) && !isNaN(lon)) {
-                  points.push({ ident: ident, lat: lat, lon: lon });
-                }
-              }
-            }
-
-            if (points.length < 2) continue;
+            if (!coordJson) continue;
+            let points;
+            try { points = JSON.parse(coordJson); } catch (e) { continue; }
+            if (!Array.isArray(points) || points.length < 2) continue;
 
             const timeLeftMin = parseDurationToMinutes(timeLeftStr);
             const elapsedMin  = parseDurationToMinutes(elapsedStr);
@@ -219,13 +205,12 @@
 
             activeCount++;
             const built = buildCurvedRoute(points);
-            const curvedLatLngs = built.path;
+            const latLngs = built.path;
             const alignedWps = built.alignedWaypoints;
 
-            const startPt = curvedLatLngs.at(0);
-            const endPt   = curvedLatLngs.at(curvedLatLngs.length - 1);
+            const startPt = latLngs.at(0);
+            const endPt   = latLngs.at(latLngs.length - 1);
 
-            // Departure & Arrival dots
             L.circleMarker(startPt, {
               radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1
             }).bindTooltip('DEP: ' + dep).addTo(flightLayer);
@@ -234,6 +219,21 @@
               radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1
             }).bindTooltip('ARR: ' + arr).addTo(flightLayer);
 
-            // Intermediate waypoint dots with ICAO/fix labels on hover
             if (alignedWps.length > 2) {
               for (let w = 1; w < alignedWps.length - 1; w++) {
+                const wp = alignedWps.at(w);
+                L.circleMarker(new Array(wp.lat, wp.lon), {
+                  radius: 2.5, color: '#7dd3fc', fillColor: '#7dd3fc', fillOpacity: 0.75
+                }).bindTooltip(wp.ident).addTo(flightLayer);
+              }
+            }
+
+            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.8 }).addTo(flightLayer);
+
+            const totalSegments = latLngs.length - 1;
+            const exactIdx = progress * totalSegments;
+            const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
+            const segFrac = exactIdx - segIdx;
+
+            const p1 = latLngs.at(segIdx);
+            const p2 = latLngs.at(segIdx + 1);
