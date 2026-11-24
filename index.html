@@ -27,7 +27,7 @@
 
   <script src="./leaflet.js"></script>
   <script>
-    window.addEventListener('load', async function() {
+    (async function initRadar() {
       const badge = document.getElementById('flight-counter');
 
       const sheetHost = 'docs' + '.google.com';
@@ -92,6 +92,40 @@
         const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
                   Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
         return (toDeg(Math.atan2(y, x)) + 360) % 360;
+      }
+
+      function angularDistanceDeg(p1, p2) {
+        const toRad = d => d * Math.PI / 180;
+        const toDeg = r => r * 180 / Math.PI;
+        const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon);
+        const lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
+        const d = 2 * Math.asin(Math.sqrt(
+          Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
+          Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2)
+        ));
+        return toDeg(d);
+      }
+
+      // Filter out any stray guessed waypoint that jumps wildly off the flight path
+      function filterOutlierWaypoints(rawPoints) {
+        if (rawPoints.length <= 2) return rawPoints;
+        const dep = rawPoints.at(0);
+        const arr = rawPoints.at(rawPoints.length - 1);
+        const totalSpan = Math.max(angularDistanceDeg(dep, arr), 20);
+        const maxJump = Math.min(Math.max(totalSpan * 0.65, 25), 75);
+
+        const cleaned = new Array(dep);
+        for (let i = 1; i < rawPoints.length - 1; i++) {
+          const pt = rawPoints.at(i);
+          const prev = cleaned.at(cleaned.length - 1);
+          const jumpFromPrev = angularDistanceDeg(prev, pt);
+          const distToArr = angularDistanceDeg(pt, arr);
+          if (jumpFromPrev <= maxJump && distToArr <= totalSpan * 1.25) {
+            cleaned.push(pt);
+          }
+        }
+        cleaned.push(arr);
+        return cleaned;
       }
 
       function getGreatCircleSegment(p1, p2, numSteps) {
@@ -189,9 +223,9 @@
             const coordJson   = row.at(21) || '';
 
             if (!coordJson) continue;
-            let points;
-            try { points = JSON.parse(coordJson); } catch (e) { continue; }
-            if (!Array.isArray(points) || points.length < 2) continue;
+            let rawPoints;
+            try { rawPoints = JSON.parse(coordJson); } catch (e) { continue; }
+            if (!Array.isArray(rawPoints) || rawPoints.length < 2) continue;
 
             const timeLeftMin = parseDurationToMinutes(timeLeftStr);
             const elapsedMin  = parseDurationToMinutes(elapsedStr);
@@ -204,36 +238,4 @@
             const progress = Math.min(Math.max(elapsedMin / totalMin, 0), 1);
 
             activeCount++;
-            const built = buildCurvedRoute(points);
-            const latLngs = built.path;
-            const alignedWps = built.alignedWaypoints;
-
-            const startPt = latLngs.at(0);
-            const endPt   = latLngs.at(latLngs.length - 1);
-
-            L.circleMarker(startPt, {
-              radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1
-            }).bindTooltip('DEP: ' + dep).addTo(flightLayer);
-
-            L.circleMarker(endPt, {
-              radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1
-            }).bindTooltip('ARR: ' + arr).addTo(flightLayer);
-
-            if (alignedWps.length > 2) {
-              for (let w = 1; w < alignedWps.length - 1; w++) {
-                const wp = alignedWps.at(w);
-                L.circleMarker(new Array(wp.lat, wp.lon), {
-                  radius: 2.5, color: '#7dd3fc', fillColor: '#7dd3fc', fillOpacity: 0.75
-                }).bindTooltip(wp.ident).addTo(flightLayer);
-              }
-            }
-
-            L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.8 }).addTo(flightLayer);
-
-            const totalSegments = latLngs.length - 1;
-            const exactIdx = progress * totalSegments;
-            const segIdx = Math.min(Math.floor(exactIdx), totalSegments - 1);
-            const segFrac = exactIdx - segIdx;
-
-            const p1 = latLngs.at(segIdx);
-            const p2 = latLngs.at(segIdx + 1);
+            const points = filterOutlierWaypoints(rawPoints);
