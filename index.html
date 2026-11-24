@@ -21,7 +21,6 @@
   <div class="radar-badge" id="flight-counter">Loading radar...</div>
   <script src="./leaflet.js"></script>
   <script type="module">
-    // Discord Embedded App SDK handshake (safe when opened outside Discord too)
     const DISCORD_CLIENT_ID = '1574685828318363739';
     if (window.location.search.includes('frame_id=') && DISCORD_CLIENT_ID.startsWith('1')) {
       try {
@@ -38,8 +37,10 @@
     window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
 
-      // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL (.../exec) BETWEEN THE SINGLE QUOTES BELOW:
-      const LIVE_API_URL = 'https://script.google.com/macros/s/AKfycbz5gHv3EoqpVUevfHUH1vYFMX1UKfRatVu2GXgLeSiBSrPAKlUv2LBjapJrSg5Ghgw/exec';
+      const EXEC_PATH = '/macros/s/AKfycbz5gHv3EoqpVUevfHUH1vYFMX1UKfRatVu2GXgLeSiBSrPAKlUv2LBjapJrSg5Ghgw/exec';
+      const isDiscord = window.location.hostname.includes('discordsays.com');
+      const scriptHost = 'script' + '.google.com';
+      const LIVE_API_URL = isDiscord ? ('/api' + EXEC_PATH) : ('https://' + scriptHost + EXEC_PATH);
 
       const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
 
@@ -136,10 +137,6 @@
       }
 
       async function updateFlights() {
-        if (!LIVE_API_URL.startsWith('http')) {
-          badge.textContent = 'Error: Paste your Web App URL in index.html';
-          return;
-        }
         try {
           const sep = LIVE_API_URL.includes('?') ? '&' : '?';
           const resp = await fetch(LIVE_API_URL + sep + 't=' + Date.now());
