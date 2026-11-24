@@ -24,7 +24,7 @@
     window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
       const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
-      const map = L.map('map', { worldCopyJump: true }).setView([15.0, 20.0], 2);
+      const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
 
       try {
         const geoResp = await fetch('./world.geojson');
@@ -38,15 +38,15 @@
       const toDeg = r => r * 180 / Math.PI;
 
       function parseCSV(text) {
-        const rows = []; let row = [], cur = '', inQuotes = false;
+        const rows = new Array(); let row = new Array(), cur = '', inQuotes = false;
         for (let i = 0; i < text.length; i++) {
           const ch = text.charAt(i), next = text.charAt(i + 1);
           if (ch === '"' && inQuotes && next === '"') { cur += '"'; i++; }
-          else if (ch === '"') inQuotes = !inQuotes;
+          else if (ch === '"') { inQuotes = !inQuotes; }
           else if (ch === ',' && !inQuotes) { row.push(cur); cur = ''; }
           else if ((ch === '\r' || ch === '\n') && !inQuotes) {
             if (ch === '\r' && next === '\n') i++;
-            row.push(cur); rows.push(row); row = []; cur = '';
+            row.push(cur); rows.push(row); row = new Array(); cur = '';
           } else { cur += ch; }
         }
         if (cur.length > 0 || row.length > 0) { row.push(cur); rows.push(row); }
@@ -73,14 +73,14 @@
         const dep = rawPts.at(0), arr = rawPts.at(rawPts.length - 1);
         const span = Math.max(angDist(dep, arr), 20);
         const maxJump = Math.min(Math.max(span * 0.65, 25), 75);
-        const clean = [dep];
+        const clean = new Array(dep);
         for (let i = 1; i < rawPts.length - 1; i++) {
           const pt = rawPts.at(i), prev = clean.at(clean.length - 1);
           if (angDist(prev, pt) <= maxJump && angDist(pt, arr) <= span * 1.25) clean.push(pt);
         }
         clean.push(arr);
 
-        const out = []; let lonShift = 0;
+        const out = new Array(); let lonShift = 0;
         for (let i = 0; i < clean.length - 1; i++) {
           const p1 = clean.at(i), p2 = clean.at(i + 1);
           const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon), lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
@@ -131,12 +131,12 @@
             activeCount++;
             const built = curveRoute(raw);
             const pts = built.path, wps = built.wps;
-            const latLngs = pts.map(p => [p.lat, p.lon]);
+            const latLngs = pts.map(p => new Array(p.lat, p.lon));
 
-            L.circleMarker([pts.at(0).lat, pts.at(0).lon], { radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 }).bindTooltip('DEP: ' + r.at(6)).addTo(flightLayer);
-            L.circleMarker([pts.at(pts.length - 1).lat, pts.at(pts.length - 1).lon], { radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1 }).bindTooltip('ARR: ' + r.at(7)).addTo(flightLayer);
+            L.circleMarker(new Array(pts.at(0).lat, pts.at(0).lon), { radius: 4, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 }).bindTooltip('DEP: ' + r.at(6)).addTo(flightLayer);
+            L.circleMarker(new Array(pts.at(pts.length - 1).lat, pts.at(pts.length - 1).lon), { radius: 4, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1 }).bindTooltip('ARR: ' + r.at(7)).addTo(flightLayer);
             for (let w = 1; w < wps.length - 1; w++) {
-              L.circleMarker([wps.at(w).lat, wps.at(w).lon], { radius: 2.5, color: '#7dd3fc', fillColor: '#7dd3fc', fillOpacity: 0.75 }).bindTooltip(wps.at(w).ident).addTo(flightLayer);
+              L.circleMarker(new Array(wps.at(w).lat, wps.at(w).lon), { radius: 2.5, color: '#7dd3fc', fillColor: '#7dd3fc', fillOpacity: 0.75 }).bindTooltip(wps.at(w).ident).addTo(flightLayer);
             }
             L.polyline(latLngs, { color: '#38bdf8', weight: 2, dashArray: '5, 8', opacity: 0.8 }).addTo(flightLayer);
 
@@ -147,8 +147,8 @@
             const dLon = toRad(p2.lon - p1.lon);
             const hdg = (toDeg(Math.atan2(Math.sin(dLon) * Math.cos(toRad(p2.lat)), Math.cos(toRad(p1.lat)) * Math.sin(toRad(p2.lat)) - Math.sin(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) * Math.cos(dLon))) + 360) % 360;
 
-            const icon = L.divIcon({ className: 'plane-icon', html: `<div style="transform: rotate(${hdg - 45}deg);">✈️</div>`, iconSize:, iconAnchor: [12, 12] });
-            L.marker([cLat, cLon], { icon: icon }).bindPopup(`<div class="popup-header">${r.at(2)} • ${r.at(6)} ➔ ${r.at(7)}</div><div class="popup-row"><b>Pilot:</b> ${r.at(1)}</div><div class="popup-row"><b>Aircraft:</b> ${r.at(3)} (${r.at(4)})</div><div class="popup-row"><b>Livery:</b> ${r.at(5)}</div><div class="popup-row"><b>Elapsed / Left:</b> ${r.at(14)} / ${r.at(13)} (${Math.round(prog * 100)}%)</div>`).addTo(flightLayer);
+            const icon = L.divIcon({ className: 'plane-icon', html: `<div style="transform: rotate(${hdg - 45}deg);">✈️</div>`, iconSize: new Array(24, 24), iconAnchor: new Array(12, 12) });
+            L.marker(new Array(cLat, cLon), { icon: icon }).bindPopup(`<div class="popup-header">${r.at(2)} • ${r.at(6)} ➔ ${r.at(7)}</div><div class="popup-row"><b>Pilot:</b> ${r.at(1)}</div><div class="popup-row"><b>Aircraft:</b> ${r.at(3)} (${r.at(4)})</div><div class="popup-row"><b>Livery:</b> ${r.at(5)}</div><div class="popup-row"><b>Elapsed / Left:</b> ${r.at(14)} / ${r.at(13)} (${Math.round(prog * 100)}%)</div>`).addTo(flightLayer);
           }
           badge.textContent = `${activeCount} Active Flight${activeCount === 1 ? '' : 's'}`;
         } catch (err) {
