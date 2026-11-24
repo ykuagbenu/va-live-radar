@@ -23,7 +23,10 @@
   <script>
     window.addEventListener('load', async function() {
       const badge = document.getElementById('flight-counter');
-      const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQEkcOvh9W7N-kPQLj_bdt-X6WAJARSuNCafDRnp5_7ohyu--aQuBAgeU3N4THcrjNjazYZWmenPAOr/pub?gid=114744306&single=true&output=csv';
+
+      // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL (.../exec) BETWEEN THE SINGLE QUOTES BELOW:
+      const LIVE_API_URL = 'https://script.google.com/macros/s/AKfycbz5gHv3EoqpVUevfHUH1vYFMX1UKfRatVu2GXgLeSiBSrPAKlUv2LBjapJrSg5Ghgw/exec';
+
       const map = L.map('map', { worldCopyJump: true }).setView(new Array(15.0, 20.0), 2);
 
       try {
@@ -36,22 +39,6 @@
       const flightLayer = L.layerGroup().addTo(map);
       const toRad = d => d * Math.PI / 180;
       const toDeg = r => r * 180 / Math.PI;
-
-      function parseCSV(text) {
-        const rows = new Array(); let row = new Array(), cur = '', inQuotes = false;
-        for (let i = 0; i < text.length; i++) {
-          const ch = text.charAt(i), next = text.charAt(i + 1);
-          if (ch === '"' && inQuotes && next === '"') { cur += '"'; i++; }
-          else if (ch === '"') { inQuotes = !inQuotes; }
-          else if (ch === ',' && !inQuotes) { row.push(cur); cur = ''; }
-          else if ((ch === '\r' || ch === '\n') && !inQuotes) {
-            if (ch === '\r' && next === '\n') i++;
-            row.push(cur); rows.push(row); row = new Array(); cur = '';
-          } else { cur += ch; }
-        }
-        if (cur.length > 0 || row.length > 0) { row.push(cur); rows.push(row); }
-        return rows;
-      }
 
       function toMins(val) {
         if (!val) return 0;
@@ -109,10 +96,16 @@
       }
 
       async function updateFlights() {
+        if (!LIVE_API_URL.startsWith('http')) {
+          badge.textContent = 'Error: Paste your Web App URL in index.html';
+          return;
+        }
         try {
-          const resp = await fetch(SHEET_CSV_URL + '&t=' + Date.now());
+          const sep = LIVE_API_URL.includes('?') ? '&' : '?';
+          const resp = await fetch(LIVE_API_URL + sep + 't=' + Date.now());
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
-          const rows = parseCSV(await resp.text());
+          const rows = await resp.json();
+
           flightLayer.clearLayers();
           let activeCount = 0;
 
@@ -157,7 +150,7 @@
       }
 
       await updateFlights();
-      setInterval(updateFlights, 60000);
+      setInterval(updateFlights, 15000);
     });
   </script>
 </body>
