@@ -79,7 +79,7 @@
         return toDeg(2 * Math.asin(Math.sqrt(Math.pow(Math.sin((lat1 - lat2) / 2), 2) + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2))));
       }
 
-      function curveRoute(rawPts) {
+            function curveRoute(rawPts) {
         const dep = rawPts.at(0), arr = rawPts.at(rawPts.length - 1);
         const span = Math.max(angDist(dep, arr), 20);
         const maxJump = Math.min(Math.max(span * 0.85, 30), 110);
@@ -89,6 +89,8 @@
         for (let i = 1; i < rawPts.length - 1; i++) {
           const pt = rawPts.at(i), prev = clean.at(clean.length - 1);
           if (pt.ident === dep.ident || pt.ident === arr.ident || seen.has(pt.ident)) continue;
+          // Skip arrival STAR fixes if pilot uploaded arrival screenshot before departure
+          if (i < rawPts.length / 2 && angDist(pt, arr) < 6 && span > 20) continue;
           if (angDist(prev, pt) <= maxJump && angDist(pt, arr) <= span * 1.25) {
             clean.push(pt);
             seen.add(pt.ident);
@@ -98,7 +100,6 @@
 
         const out = new Array();
         const cumDist = new Array(0);
-        let lonShift = 0;
 
         for (let i = 0; i < clean.length - 1; i++) {
           const p1 = clean.at(i), p2 = clean.at(i + 1);
@@ -118,15 +119,15 @@
             }
             if (out.length > 0) {
               const prevPt = out.at(out.length - 1);
-              const diff = (lon + lonShift) - prevPt.lon;
-              if (diff > 180) lonShift -= 360;
-              else if (diff < -180) lonShift += 360;
-              const finalLon = lon + lonShift;
+              let diff = lon - prevPt.lon;
+              while (diff > 180) diff -= 360;
+              while (diff < -180) diff += 360;
+              const finalLon = prevPt.lon + diff;
               const segStepDist = angDist(prevPt, { lat: lat, lon: finalLon });
               cumDist.push(cumDist.at(cumDist.length - 1) + segStepDist);
               out.push({ lat: lat, lon: finalLon });
             } else {
-              out.push({ lat: lat, lon: lon + lonShift });
+              out.push({ lat: lat, lon: lon });
             }
           }
         }
