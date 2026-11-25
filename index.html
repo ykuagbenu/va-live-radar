@@ -215,3 +215,46 @@
             activeCount++;
             const flightId = r.at(19) || (r.at(2) + '_' + r.at(6) + '_' + r.at(7));
             const built = curveRoute(raw);
+                        const pts = built.path, wps = built.wps, cumDist = built.cumDist;
+
+            const pos = positionAlongDistance(pts, cumDist, prog);
+            const p1 = pos.p1, p2 = pos.p2, frac = pos.frac;
+            const cLat = p1.lat + (p2.lat - p1.lat) * frac, cLon = p1.lon + (p2.lon - p1.lon) * frac;
+            const dLon = toRad(p2.lon - p1.lon);
+            const hdg = (toDeg(Math.atan2(Math.sin(dLon) * Math.cos(toRad(p2.lat)), Math.cos(toRad(p1.lat)) * Math.sin(toRad(p2.lat)) - Math.sin(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) * Math.cos(dLon))) + 360) % 360;
+
+            const icon = L.divIcon({ className: 'plane-icon', html: `<div style="transform: rotate(${hdg - 45}deg);">✈️</div>`, iconSize: new Array(24, 24), iconAnchor: new Array(12, 12) });
+            const marker = L.marker(new Array(cLat, cLon), { icon: icon })
+              .bindPopup(`<div class="popup-header">${r.at(2)} • ${r.at(6)} ➔ ${r.at(7)}</div><div class="popup-row"><b>Pilot:</b> ${r.at(1)}</div><div class="popup-row"><b>Aircraft:</b> ${r.at(3)} (${r.at(4)})</div><div class="popup-row"><b>Livery:</b> ${r.at(5)}</div><div class="popup-row"><b>Elapsed / Left:</b> ${r.at(14)} / ${r.at(13)} (${Math.round(prog * 100)}%)</div>`)
+              .addTo(planeLayer);
+
+            marker.on('click', function() {
+              selectedFlightId = flightId;
+              drawFlightRoute(pts, wps, r.at(6), r.at(7));
+            });
+
+            if (selectedFlightId === flightId) {
+              stillSelected = true;
+              drawFlightRoute(pts, wps, r.at(6), r.at(7));
+              marker.openPopup();
+            }
+          }
+
+          if (selectedFlightId && !stillSelected) {
+            selectedFlightId = null;
+            selectedRouteLayer.clearLayers();
+          }
+
+          badge.textContent = `${activeCount} Active Flight${activeCount === 1 ? '' : 's'}`;
+        } catch (err) {
+          badge.textContent = 'Radar feed error';
+        }
+      }
+
+      await updateFlights();
+      setInterval(updateFlights, 15000);
+    });
+  </script>
+</body>
+</html>
+
