@@ -75,9 +75,10 @@
       }
 
       function angDist(a, b) {
-        const lat1 = toRad(a.lat), lon1 = toRad(a.lon), lat2 = toRad(b.lat), lon2 = toRad(b.lon);
-        return toDeg(2 * Math.asin(Math.sqrt(Math.pow(Math.sin((lat1 - lat2) / 2), 2) + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2))));
-      }
+  const lat1 = toRad(a.lat), lon1 = toRad(a.lon), lat2 = toRad(b.lat), lon2 = toRad(b.lon);
+  const h = Math.pow(Math.sin((lat1 - lat2) / 2), 2) + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2);
+  return toDeg(2 * Math.asin(Math.min(1, Math.sqrt(Math.max(0, h)))));
+}
 
          function curveRoute(rawPts) {
         const dep = rawPts.at(0), arr = rawPts.at(rawPts.length - 1);
