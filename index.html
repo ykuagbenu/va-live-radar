@@ -79,11 +79,9 @@
   const h = Math.pow(Math.sin((lat1 - lat2) / 2), 2) + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2);
   return toDeg(2 * Math.asin(Math.min(1, Math.sqrt(Math.max(0, h)))));
 }
-
-         function curveRoute(rawPts) {
+      function curveRoute(rawPts) {
         const dep = rawPts.at(0), arr = rawPts.at(rawPts.length - 1);
-        const span = Math.max(angDist(dep, arr), 20);
-        const maxJump = Math.min(Math.max(span * 0.85, 30), 110);
+        const span = Math.max(angDist(dep, arr), 5);
         const clean = new Array(dep);
         const seen = new Set();
         seen.add(dep.ident);
@@ -91,17 +89,18 @@
         for (let i = 1; i < rawPts.length - 1; i++) {
           const pt = rawPts.at(i), prev = clean.at(clean.length - 1);
           if (pt.ident === dep.ident || pt.ident === arr.ident || seen.has(pt.ident)) continue;
-          if (i < rawPts.length / 2 && angDist(pt, arr) < 6 && span > 20) continue;
-          if (angDist(prev, pt) <= maxJump && angDist(pt, arr) <= span * 1.25) {
+          const distFromPrev = angDist(prev, pt);
+          const distToArr = angDist(pt, arr);
+          const prevDistToArr = angDist(prev, arr);
+          // Only accept waypoints that move forward toward destination without wild jumps
+          if (distFromPrev <= span * 0.85 && distToArr < prevDistToArr && (distFromPrev + distToArr) <= span * 1.35) {
             clean.push(pt);
             seen.add(pt.ident);
           }
         }
         clean.push(arr);
-           
-        const out = new Array();
-        const cumDist = new Array(0);
 
+        const out = new Array();
         for (let i = 0; i < clean.length - 1; i++) {
           const p1 = clean.at(i), p2 = clean.at(i + 1);
           const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon), lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
@@ -123,37 +122,37 @@
               let diff = lon - prevPt.lon;
               while (diff > 180) diff -= 360;
               while (diff < -180) diff += 360;
-              const finalLon = prevPt.lon + diff;
-              const segStepDist = angDist(prevPt, { lat: lat, lon: finalLon });
-              cumDist.push(cumDist.at(cumDist.length - 1) + segStepDist);
-              out.push({ lat: lat, lon: finalLon });
+              out.push({ lat: lat, lon: prevPt.lon + diff });
             } else {
               out.push({ lat: lat, lon: lon });
             }
           }
         }
-        return { path: out, wps: clean, cumDist: cumDist };
+        return { path: out, wps: clean };
       }
 
-      function positionAlongDistance(pts, cumDist, prog) {
-        const totalDist = cumDist.at(cumDist.length - 1);
-        if (totalDist <= 0 || prog <= 0) {
-          return { p1: pts.at(0), p2: pts.at(1), frac: 0 };
+      function positionAlongDistance(pts, prog) {
+        if (pts.length < 2 || prog <= 0) return { p1: pts.at(0), p2: pts.at(1), frac: 0 };
+        if (prog >= 1) return { p1: pts.at(pts.length - 2), p2: pts.at(pts.length - 1), frac: 1 };
+
+        const cum = new Array(0);
+        let total = 0;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const step = angDist(pts.at(i), pts.at(i + 1));
+          total += isNaN(step) ? 0 : step;
+          cum.push(total);
         }
-        if (prog >= 1) {
-          const last = pts.length - 1;
-          return { p1: pts.at(last - 1), p2: pts.at(last), frac: 1 };
-        }
-        const targetDist = prog * totalDist;
-        for (let i = 0; i < cumDist.length - 1; i++) {
-          if (targetDist >= cumDist.at(i) && targetDist <= cumDist.at(i + 1)) {
-            const segLen = cumDist.at(i + 1) - cumDist.at(i);
-            const frac = segLen > 0 ? (targetDist - cumDist.at(i)) / segLen : 0;
+        if (total <= 0) return { p1: pts.at(0), p2: pts.at(1), frac: 0 };
+
+        const target = prog * total;
+        for (let i = 0; i < cum.length - 1; i++) {
+          if (target >= cum.at(i) && target <= cum.at(i + 1)) {
+            const seg = cum.at(i + 1) - cum.at(i);
+            const frac = seg > 0 ? (target - cum.at(i)) / seg : 0;
             return { p1: pts.at(i), p2: pts.at(i + 1), frac: frac };
           }
         }
-        const last = pts.length - 1;
-        return { p1: pts.at(last - 1), p2: pts.at(last), frac: 1 };
+        return { p1: pts.at(pts.length - 2), p2: pts.at(pts.length - 1), frac: 1 };
       }
 
       function drawFlightRoute(pts, wps, depCode, arrCode) {
@@ -217,9 +216,9 @@
             activeCount++;
             const flightId = r.at(19) || (r.at(2) + '_' + r.at(6) + '_' + r.at(7));
             const built = curveRoute(raw);
-                        const pts = built.path, wps = built.wps, cumDist = built.cumDist;
+           const pts = built.path, wps = built.wps;
+           const pos = positionAlongDistance(pts, prog);
 
-            const pos = positionAlongDistance(pts, cumDist, prog);
             const p1 = pos.p1, p2 = pos.p2, frac = pos.frac;
             const cLat = p1.lat + (p2.lat - p1.lat) * frac, cLon = p1.lon + (p2.lon - p1.lon) * frac;
             const dLon = toRad(p2.lon - p1.lon);
