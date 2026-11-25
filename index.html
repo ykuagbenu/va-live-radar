@@ -82,15 +82,24 @@
       function curveRoute(rawPts) {
         const dep = rawPts.at(0), arr = rawPts.at(rawPts.length - 1);
         const span = Math.max(angDist(dep, arr), 20);
-        const maxJump = Math.min(Math.max(span * 0.65, 25), 75);
+        const maxJump = Math.min(Math.max(span * 0.85, 30), 110);
         const clean = new Array(dep);
+        const seen = new Set([dep.ident]);
+
         for (let i = 1; i < rawPts.length - 1; i++) {
           const pt = rawPts.at(i), prev = clean.at(clean.length - 1);
-          if (angDist(prev, pt) <= maxJump && angDist(pt, arr) <= span * 1.25) clean.push(pt);
+          if (pt.ident === dep.ident || pt.ident === arr.ident || seen.has(pt.ident)) continue;
+          if (angDist(prev, pt) <= maxJump && angDist(pt, arr) <= span * 1.25) {
+            clean.push(pt);
+            seen.add(pt.ident);
+          }
         }
         clean.push(arr);
 
-        const out = new Array(); let lonShift = 0;
+        const out = new Array();
+        const cumDist = new Array(0);
+        let lonShift = 0;
+
         for (let i = 0; i < clean.length - 1; i++) {
           const p1 = clean.at(i), p2 = clean.at(i + 1);
           const lat1 = toRad(p1.lat), lon1 = toRad(p1.lon), lat2 = toRad(p2.lat), lon2 = toRad(p2.lon);
@@ -108,14 +117,41 @@
               lon = toDeg(Math.atan2(y, x));
             }
             if (out.length > 0) {
-              const diff = (lon + lonShift) - out.at(out.length - 1).lon;
+              const prevPt = out.at(out.length - 1);
+              const diff = (lon + lonShift) - prevPt.lon;
               if (diff > 180) lonShift -= 360;
               else if (diff < -180) lonShift += 360;
+              const finalLon = lon + lonShift;
+              const segStepDist = angDist(prevPt, { lat: lat, lon: finalLon });
+              cumDist.push(cumDist.at(cumDist.length - 1) + segStepDist);
+              out.push({ lat: lat, lon: finalLon });
+            } else {
+              out.push({ lat: lat, lon: lon + lonShift });
             }
-            out.push({ lat: lat, lon: lon + lonShift });
           }
         }
-        return { path: out, wps: clean };
+        return { path: out, wps: clean, cumDist: cumDist };
+      }
+
+      function positionAlongDistance(pts, cumDist, prog) {
+        const totalDist = cumDist.at(cumDist.length - 1);
+        if (totalDist <= 0 || prog <= 0) {
+          return { p1: pts.at(0), p2: pts.at(1), frac: 0 };
+        }
+        if (prog >= 1) {
+          const last = pts.length - 1;
+          return { p1: pts.at(last - 1), p2: pts.at(last), frac: 1 };
+        }
+        const targetDist = prog * totalDist;
+        for (let i = 0; i < cumDist.length - 1; i++) {
+          if (targetDist >= cumDist.at(i) && targetDist <= cumDist.at(i + 1)) {
+            const segLen = cumDist.at(i + 1) - cumDist.at(i);
+            const frac = segLen > 0 ? (targetDist - cumDist.at(i)) / segLen : 0;
+            return { p1: pts.at(i), p2: pts.at(i + 1), frac: frac };
+          }
+        }
+        const last = pts.length - 1;
+        return { p1: pts.at(last - 1), p2: pts.at(last), frac: 1 };
       }
 
       function drawFlightRoute(pts, wps, depCode, arrCode) {
@@ -136,12 +172,29 @@
         }
       }
 
+      async function fetchLiveRows() {
+        const sep = LIVE_API_URL.includes('?') ? '&' : '?';
+        const reqUrl = LIVE_API_URL + sep + 't=' + Date.now();
+        if (!isDiscord) {
+          const resp = await fetch(reqUrl);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          return await resp.json();
+        }
+        const firstResp = await fetch(reqUrl, { redirect: 'manual' });
+        if (firstResp.status >= 300 && firstResp.status < 400) {
+          const loc = firstResp.headers.get('location') || '';
+          const parsed = new URL(loc);
+          const proxiedResp = await fetch('/guser' + parsed.pathname + parsed.search);
+          if (!proxiedResp.ok) throw new Error('Proxy HTTP ' + proxiedResp.status);
+          return await proxiedResp.json();
+        }
+        if (!firstResp.ok) throw new Error('HTTP ' + firstResp.status);
+        return await firstResp.json();
+      }
+
       async function updateFlights() {
         try {
-          const sep = LIVE_API_URL.includes('?') ? '&' : '?';
-          const resp = await fetch(LIVE_API_URL + sep + 't=' + Date.now());
-          if (!resp.ok) throw new Error('HTTP ' + resp.status);
-          const rows = await resp.json();
+          const rows = await fetchLiveRows();
 
           planeLayer.clearLayers();
           let activeCount = 0;
@@ -162,46 +215,3 @@
             activeCount++;
             const flightId = r.at(19) || (r.at(2) + '_' + r.at(6) + '_' + r.at(7));
             const built = curveRoute(raw);
-            const pts = built.path, wps = built.wps;
-
-            const exact = prog * (pts.length - 1);
-            const idx = Math.min(Math.floor(exact), pts.length - 2), frac = exact - idx;
-            const p1 = pts.at(idx), p2 = pts.at(idx + 1);
-            const cLat = p1.lat + (p2.lat - p1.lat) * frac, cLon = p1.lon + (p2.lon - p1.lon) * frac;
-            const dLon = toRad(p2.lon - p1.lon);
-            const hdg = (toDeg(Math.atan2(Math.sin(dLon) * Math.cos(toRad(p2.lat)), Math.cos(toRad(p1.lat)) * Math.sin(toRad(p2.lat)) - Math.sin(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) * Math.cos(dLon))) + 360) % 360;
-
-            const icon = L.divIcon({ className: 'plane-icon', html: `<div style="transform: rotate(${hdg - 45}deg);">✈️</div>`, iconSize: new Array(24, 24), iconAnchor: new Array(12, 12) });
-            const marker = L.marker(new Array(cLat, cLon), { icon: icon })
-              .bindPopup(`<div class="popup-header">${r.at(2)} • ${r.at(6)} ➔ ${r.at(7)}</div><div class="popup-row"><b>Pilot:</b> ${r.at(1)}</div><div class="popup-row"><b>Aircraft:</b> ${r.at(3)} (${r.at(4)})</div><div class="popup-row"><b>Livery:</b> ${r.at(5)}</div><div class="popup-row"><b>Elapsed / Left:</b> ${r.at(14)} / ${r.at(13)} (${Math.round(prog * 100)}%)</div>`)
-              .addTo(planeLayer);
-
-            marker.on('click', function() {
-              selectedFlightId = flightId;
-              drawFlightRoute(pts, wps, r.at(6), r.at(7));
-            });
-
-            if (selectedFlightId === flightId) {
-              stillSelected = true;
-              drawFlightRoute(pts, wps, r.at(6), r.at(7));
-              marker.openPopup();
-            }
-          }
-
-          if (selectedFlightId && !stillSelected) {
-            selectedFlightId = null;
-            selectedRouteLayer.clearLayers();
-          }
-
-          badge.textContent = `${activeCount} Active Flight${activeCount === 1 ? '' : 's'}`;
-        } catch (err) {
-          badge.textContent = 'Radar feed error';
-        }
-      }
-
-      await updateFlights();
-      setInterval(updateFlights, 15000);
-    });
-  </script>
-</body>
-</html>
