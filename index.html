@@ -219,6 +219,7 @@
            const pts = built.path, wps = built.wps;
            const pos = positionAlongDistance(pts, prog);
 
+
             const p1 = pos.p1, p2 = pos.p2, frac = pos.frac;
             const cLat = p1.lat + (p2.lat - p1.lat) * frac, cLon = p1.lon + (p2.lon - p1.lon) * frac;
             const dLon = toRad(p2.lon - p1.lon);
