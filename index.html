@@ -135,7 +135,8 @@
         if (pts.length < 2 || prog <= 0) return { p1: pts.at(0), p2: pts.at(1), frac: 0 };
         if (prog >= 1) return { p1: pts.at(pts.length - 2), p2: pts.at(pts.length - 1), frac: 1 };
 
-        const cum = new Array(0);
+        const cum =;
+        
         let total = 0;
         for (let i = 0; i < pts.length - 1; i++) {
           const step = angDist(pts.at(i), pts.at(i + 1));
